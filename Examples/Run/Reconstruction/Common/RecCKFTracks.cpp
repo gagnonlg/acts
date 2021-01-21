@@ -10,7 +10,8 @@
 #ifdef ACTS_PLUGIN_ONNX
 #include "Acts/Plugins/Onnx/MLTrackClassifier.hpp"
 #endif
-#include "ActsExamples/Digitization/HitSmearing.hpp"
+#include "ActsExamples/Digitization/DigitizationOptions.hpp"
+#include "ActsExamples/Digitization/SmearingAlgorithm.hpp"
 #include "ActsExamples/Framework/Sequencer.hpp"
 #include "ActsExamples/Framework/WhiteBoard.hpp"
 #include "ActsExamples/Geometry/CommonGeometry.hpp"
@@ -18,6 +19,7 @@
 #include "ActsExamples/Io/Csv/CsvParticleReader.hpp"
 #include "ActsExamples/Io/Csv/CsvSimHitReader.hpp"
 #include "ActsExamples/Io/Performance/CKFPerformanceWriter.hpp"
+#include "ActsExamples/Io/Root/RootDigitizationWriter.hpp"
 #include "ActsExamples/Io/Root/RootTrajectoryParametersWriter.hpp"
 #include "ActsExamples/Io/Root/RootTrajectoryStatesWriter.hpp"
 #include "ActsExamples/Options/CommonOptions.hpp"
@@ -52,6 +54,7 @@ int runRecCKFTracks(int argc, char* argv[],
   detector->addOptions(desc);
   Options::addBFieldOptions(desc);
   Options::addTrackFindingOptions(desc);
+  Options::addDigitizationOptions(desc);
 
   auto vm = Options::parse(desc, argc, argv);
   if (vm.empty()) {
@@ -91,18 +94,31 @@ int runRecCKFTracks(int argc, char* argv[],
       std::make_shared<CsvSimHitReader>(simHitReaderCfg, logLevel));
 
   // Create smeared measurements
-  HitSmearing::Config hitSmearingCfg;
+  SmearingAlgorithm::Config hitSmearingCfg = Options::readSmearingConfig(vm);
   hitSmearingCfg.inputSimHits = simHitReaderCfg.outputSimHits;
   hitSmearingCfg.outputMeasurements = "measurements";
   hitSmearingCfg.outputSourceLinks = "sourcelinks";
   hitSmearingCfg.outputMeasurementParticlesMap = "measurement_particles_map";
   hitSmearingCfg.outputMeasurementSimHitsMap = "measurement_simhits_map";
-  hitSmearingCfg.sigmaLoc0 = 25_um;
-  hitSmearingCfg.sigmaLoc1 = 100_um;
   hitSmearingCfg.randomNumbers = rnd;
   hitSmearingCfg.trackingGeometry = trackingGeometry;
   sequencer.addAlgorithm(
-      std::make_shared<HitSmearing>(hitSmearingCfg, logLevel));
+      std::make_shared<SmearingAlgorithm>(hitSmearingCfg, logLevel));
+
+  // Write digitsation output as ROOT files
+  if (vm["output-root"].template as<bool>()) {
+    RootDigitizationWriter::Config smearWriterRoot;
+    smearWriterRoot.inputMeasurements = hitSmearingCfg.outputMeasurements;
+    smearWriterRoot.inputSimHits = hitSmearingCfg.inputSimHits;
+    smearWriterRoot.inputMeasurementSimHitsMap =
+      hitSmearingCfg.outputMeasurementSimHitsMap;
+    smearWriterRoot.filePath =
+      joinPaths(outputDir, hitSmearingCfg.outputMeasurements + ".root");
+    smearWriterRoot.smearers = hitSmearingCfg.smearers;
+    smearWriterRoot.trackingGeometry = trackingGeometry;
+    sequencer.addWriter(
+      std::make_shared<RootDigitizationWriter>(smearWriterRoot, logLevel));
+  }
 
   // Pre-select particles
   // The pre-selection will select truth particles satisfying provided criteria
