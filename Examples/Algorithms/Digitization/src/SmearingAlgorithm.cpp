@@ -184,7 +184,7 @@ ActsExamples::ProcessCode ActsExamples::SmearingAlgorithm::execute(
 	    Acts::Vector2 pos_fst { par_fst[Acts::ePos0], par_fst[Acts::ePos1] };
 	    Acts::SymMatrix2 cov_fst = Acts::SymMatrix2::Zero();
 	    cov_fst(0, 0) = covm_fst(Acts::ePos0, Acts::ePos0);
-	    cov_fst(1, 1) = covm_fst(Acts::ePos0, Acts::ePos0);
+	    cov_fst(1, 1) = covm_fst(Acts::ePos1, Acts::ePos1);
 
 	    for (size_t j = 0; j < unmerged_measurements.size(); j++) {
 	      if (i == j or associated_simhits.at(j).empty()) // already merged
@@ -214,6 +214,7 @@ ActsExamples::ProcessCode ActsExamples::SmearingAlgorithm::execute(
 		associated_simhits.at(j).clear();
 
 		// update position
+		// FIXME doens't change the measurement
 		pos_fst += pos_snd;
 		pos_fst *= 0.5;
 		cov_fst += cov_snd;
