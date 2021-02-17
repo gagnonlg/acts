@@ -135,6 +135,7 @@ ActsExamples::ProcessCode ActsExamples::SmearingAlgorithm::execute(
       return ProcessCode::ABORT;
     }
 
+ 
     // run the smearer. iterate over the hits for this surface inside the
     // visitor so we do not need to lookup the variant object per-hit.
     std::visit(
@@ -144,9 +145,13 @@ ActsExamples::ProcessCode ActsExamples::SmearingAlgorithm::execute(
               Acts::Measurement<IndexSourceLink, Acts::BoundIndices,
                                 ThisSmearer::size()>;
 
+	  // Intermediary storage
+	  std::vector<ThisMeasurement> unmerged_measurements;
+	  std::vector<std::vector<ActsFatras::Hit>> associated_simhits; // FIXME
+
           for (auto h = moduleSimHits.begin(); h != moduleSimHits.end(); ++h) {
             const auto& simHit = *h;
-            const auto simHitIdx = simHits.index_of(h);
+            // const auto simHitIdx = simHits.index_of(h);
 
             auto res = smearer(rng, simHit, *surfacePtr, ctx.geoContext);
             if (not res.ok()) {
@@ -156,24 +161,82 @@ ActsExamples::ProcessCode ActsExamples::SmearingAlgorithm::execute(
             }
             const auto& [par, cov] = res.value();
 
-            // the measurement container is unordered and the index under which
-            // the measurement will be stored is known before adding it.
-            Index hitIdx = measurements.size();
-            IndexSourceLink sourceLink(moduleGeoId, hitIdx);
+	    Index hitIdx = unmerged_measurements.size();
+	    IndexSourceLink sourceLink(moduleGeoId, hitIdx);
             ThisMeasurement meas(sourceLink, smearer.indices, par, cov);
 
-            // add to output containers
-            // index map and source link container are geometry-ordered.
-            // since the input is also geometry-ordered, new items can
-            // be added at the end.
-            sourceLinks.emplace_hint(sourceLinks.end(), std::move(sourceLink));
-            measurements.emplace_back(std::move(meas));
-            // this digitization does not do hit merging so there is only one
-            // mapping entry for each digitized hit.
-            hitParticlesMap.emplace_hint(hitParticlesMap.end(), hitIdx,
-                                         simHit.particleId());
-            hitSimHitsMap.emplace_hint(hitSimHitsMap.end(), hitIdx, simHitIdx);
-          }
+	    unmerged_measurements.emplace_back(std::move(meas));
+	    std::vector<ActsFatras::Hit> v{simHit};
+	    associated_simhits.push_back(v);
+	  }
+
+	  // FIXME: this should be optimized
+	  for (size_t i = 0; i < unmerged_measurements.size(); i++) {
+	    if (associated_simhits.at(i).empty()) // already merged
+	      continue;
+
+	    // N.B.
+	    // This method only works if the covariance is diagonal
+
+	    auto& fst = unmerged_measurements.at(i);
+	    auto& par_fst = fst.parameters();
+	    auto& covm_fst = fst.covariance();
+	    Acts::Vector2 pos_fst { par_fst[Acts::ePos0], par_fst[Acts::ePos1] };
+	    Acts::SymMatrix2 cov_fst = Acts::SymMatrix2::Zero();
+	    cov_fst(0, 0) = covm_fst(Acts::ePos0, Acts::ePos0);
+	    cov_fst(1, 1) = covm_fst(Acts::ePos0, Acts::ePos0);
+
+	    for (size_t j = 0; j < unmerged_measurements.size(); j++) {
+	      if (i == j or associated_simhits.at(j).empty()) // already merged
+		continue;
+
+	      auto& snd = unmerged_measurements.at(j);
+	      auto& par_snd = snd.parameters();
+	      auto& covm_snd = snd.covariance();
+	      Acts::Vector2 pos_snd { par_snd[Acts::ePos0], par_snd[Acts::ePos1] };
+	      Acts::SymMatrix2 cov_snd = Acts::SymMatrix2::Zero();
+	      cov_snd(0, 0) = covm_snd(Acts::ePos0, Acts::ePos0);
+	      cov_snd(1, 1) = covm_snd(Acts::ePos1, Acts::ePos1);
+
+	      auto diff = (pos_snd - pos_fst).normalized();
+
+	      auto proj_pos_fst = pos_fst.dot(diff);
+	      auto proj_pos_snd = pos_fst.dot(diff);
+
+	      double proj_cov_fst = diff.transpose() * cov_fst * diff;
+	      double proj_cov_snd = diff.transpose() * cov_snd * diff;
+
+	      // TODO: configurable criterion
+	      if ((proj_pos_fst + std::sqrt(proj_cov_fst)) > (proj_pos_snd - std::sqrt(proj_cov_snd))) {
+		// MERGE
+		for (auto &sh : associated_simhits.at(j))
+		  associated_simhits.at(i).push_back(std::move(sh));
+		associated_simhits.at(j).clear();
+
+		// update position
+		pos_fst += pos_snd;
+		pos_fst *= 0.5;
+		cov_fst += cov_snd;
+		cov_fst *= 0.5;
+	      }
+	    }
+	  }
+
+	  for (size_t i = 0; i < unmerged_measurements.size(); i++) {
+	    if (associated_simhits.at(i).empty())
+	      continue; // Merged into another
+	    Index hitIdx = measurements.size();
+	    IndexSourceLink sourceLink(moduleGeoId, hitIdx);
+	    sourceLinks.emplace_hint(sourceLinks.end(), std::move(sourceLink));
+	    // FIXME: the source link will be wrong here
+	    measurements.emplace_back(std::move(unmerged_measurements[i]));
+	    for (auto &sh : associated_simhits.at(i)) {
+	      // FIXME: does this work like I think it does?
+	      // const auto simHitIdx = simHits.index_of(sh); // FIXME BROKEN
+	      hitParticlesMap.emplace_hint(hitParticlesMap.end(), hitIdx, sh.particleId());
+	      // hitSimHitsMap.emplace_hint(hitSimHitsMap.end(), hitIdx, simHitIdx); // FIXME BROKEN
+	    }
+	  }
         },
         *smearerItr);
   }
