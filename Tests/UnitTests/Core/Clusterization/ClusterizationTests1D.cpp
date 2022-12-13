@@ -70,7 +70,6 @@ void hash(Cluster1D& cl)
 	boost::hash_combine(cl.hash, c.col);
 }
 
-
 BOOST_AUTO_TEST_CASE(Grid_1D_rand)
 {
     using Cell = Cell1D;
@@ -113,14 +112,14 @@ BOOST_AUTO_TEST_CASE(Grid_1D_rand)
 	clusters.push_back(std::move(cl));
     }
 
-    for (Cluster cl : clusters)
+    for (Cluster& cl : clusters)
 	hash(cl);
 
     std::shuffle(cells.begin(), cells.end(), rnd);
 
     ClusterC newCls = Ccl::createClusters<CellC, ClusterC>(cells);
 
-    for (Cluster cl : newCls)
+    for (Cluster& cl : newCls)
 	hash(cl);
 
     std::sort(clusters.begin(), clusters.end(), clHashComp);
