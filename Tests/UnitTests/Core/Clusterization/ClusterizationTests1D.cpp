@@ -82,7 +82,8 @@ BOOST_AUTO_TEST_CASE(Grid_1D_rand)
     size_t minspace = 1;
     size_t maxspace = 10;
     size_t nclusters = 100;
-    int seed = 204769;
+    int startSeed = 204769;
+    size_t ntries = 100;
 
     std::cout << "Grid_1D_rand test with parameters:" << std::endl;
     std::cout << "  minsize = " << minsize << std::endl;
@@ -90,46 +91,46 @@ BOOST_AUTO_TEST_CASE(Grid_1D_rand)
     std::cout << "  minspace = " << minspace << std::endl;
     std::cout << "  maxspace = " << maxspace << std::endl;
     std::cout << "  nclusters = " << nclusters << std::endl;
-    std::cout << "  seed = " << seed << std::endl;
+    std::cout << "  startSeed = " << startSeed << std::endl;
+    std::cout << "  ntries = " << ntries << std::endl;
 
-    std::mt19937_64 rnd(204769);
-    std::uniform_int_distribution<size_t> distr_size(minsize, maxsize);
-    std::uniform_int_distribution<size_t> distr_space(minspace, maxspace);
+    while (ntries--) {
+	std::mt19937_64 rnd(startSeed++);
+	std::uniform_int_distribution<size_t> distr_size(minsize, maxsize);
+	std::uniform_int_distribution<size_t> distr_space(minspace, maxspace);
 
-    int col = 0;
+	int col = 0;
 
-    CellC cells;
-    ClusterC clusters;
-    while (nclusters--) {
-	Cluster cl;
-	col += distr_space(rnd);
-	size_t size = distr_size(rnd);
-	for (size_t i = 0; i < size; i++) {
-	    Cell cell(col++);
-	    cells.push_back(cell);
-	    clusterAddCell(cl, cell);
+	CellC cells;
+	ClusterC clusters;
+	for (size_t i = 0; i < nclusters; i++) {
+	    Cluster cl;
+	    col += distr_space(rnd);
+	    size_t size = distr_size(rnd);
+	    for (size_t i = 0; i < size; i++) {
+		Cell cell(col++);
+		cells.push_back(cell);
+		clusterAddCell(cl, cell);
+	    }
+	    clusters.push_back(std::move(cl));
 	}
-	clusters.push_back(std::move(cl));
+	for (Cluster& cl : clusters)
+	    hash(cl);
+
+	std::shuffle(cells.begin(), cells.end(), rnd);
+
+	ClusterC newCls = Ccl::createClusters<CellC, ClusterC>(cells);
+
+	for (Cluster& cl : newCls)
+	    hash(cl);
+
+	std::sort(clusters.begin(), clusters.end(), clHashComp);
+	std::sort(newCls.begin(), newCls.end(), clHashComp);
+
+	BOOST_CHECK_EQUAL(clusters.size(), newCls.size());
+	for (size_t i = 0; i < clusters.size(); i++)
+	    BOOST_CHECK_EQUAL(clusters.at(i).hash, newCls.at(i).hash);
     }
-
-    for (Cluster& cl : clusters)
-	hash(cl);
-
-    std::shuffle(cells.begin(), cells.end(), rnd);
-
-    ClusterC newCls = Ccl::createClusters<CellC, ClusterC>(cells);
-
-    for (Cluster& cl : newCls)
-	hash(cl);
-
-    std::sort(clusters.begin(), clusters.end(), clHashComp);
-    std::sort(newCls.begin(), newCls.end(), clHashComp);
-
-    BOOST_CHECK_EQUAL(clusters.size(), newCls.size());
-    for (size_t i = 0; i < clusters.size(); i++)
-	BOOST_CHECK_EQUAL(clusters.at(i).hash, newCls.at(i).hash);
-    // for (size_t i = 0; i < clusters.size(); i++)
-
 }
 
 } // namespace Test
